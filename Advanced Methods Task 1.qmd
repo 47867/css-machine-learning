@@ -1,0 +1,199 @@
+---
+title: "Advanced Methods II - Task 1"
+format: html
+editor: visual
+---
+
+## Task 1
+
+```{r}
+# check version
+version
+```
+
+```{r}
+# compile pacman from source if necessary
+if (!require("pacman")) install.packages("pacman")
+
+library(pacman)
+
+# compile other libraries from source and load them into environment
+p_load(
+  rmarkdown,
+  tidyverse,
+  tidycomm,
+  quanteda,
+  quanteda.textmodels,
+  quanteda.textstats,
+  caret,
+  wordvector,
+  ggplot2
+)
+```
+
+```{r}
+# load dataset into environment
+claims <- read_csv("victimhood_claims.csv") %>%
+  rowid_to_column() %>%
+  mutate(Ingroup = Ingroup != "0" & Ingroup != "103",
+         Injustice = Injustice != 0)
+```
+
+```{r}
+# get bigrams
+bigrams <- claims$Narrative %>%
+  textstat_collocations(
+    size = 2,
+    min_count = 5
+  )
+
+# get top10 values
+top10_count <- bigrams %>%
+  arrange(desc(count)) %>%
+  slice(1:10)
+
+top10_lambda <- bigrams %>%
+  arrange(desc(lambda)) %>%
+  slice(1:10)
+
+top10_z <- bigrams %>%
+  arrange(desc(z)) %>%
+  slice(1:10)
+
+# print values
+top10_count$collocation
+top10_lambda$collocation
+top10_z$collocation
+```
+
+```{r}
+# tokenize
+tokens <- claims$Narrative %>%
+  tokens(remove_punct = TRUE,
+         split_hyphens = TRUE,
+         verbose = TRUE)
+
+# create dfm
+dfm_claims <- dfm(tokens)
+
+# trim dfm
+dfm_claims_1pct <- dfm_claims %>%
+  dfm_trim(
+    min_docfreq = 0.01,
+    docfreq_type = "prop"
+  )
+
+dfm_claims_5pct <- dfm_claims %>%
+  dfm_trim(
+    min_docfreq = 0.05,
+    docfreq_type = "prop"
+  )
+
+dfm_claims_10pct <- dfm_claims %>%
+  dfm_trim(
+    min_docfreq = 0.1,
+    docfreq_type = "prop"
+  )
+
+dfm_claims_15pct <- dfm_claims %>%
+  dfm_trim(
+    min_docfreq = 0.15,
+    docfreq_type = "prop"
+  )
+
+# get sparsity
+sparsity_table <- data.frame(
+  category = c(
+    "1%",
+    "5%",
+    "10%",
+    "15%"
+  ),
+  value = c(
+    sparsity(dfm_claims_1pct),
+    sparsity(dfm_claims_5pct),
+    sparsity(dfm_claims_10pct),
+    sparsity(dfm_claims_15pct)
+  )
+)
+```
+
+```{r}
+# create chart
+sparsity_chart <- sparsity_table %>%
+  ggplot(
+    aes(x = reorder(category, -value),
+        y= value)
+  ) + 
+  geom_col() + 
+  scale_y_continuous(
+    limits = c(0,1),
+    labels = scales::percent
+  ) + 
+  labs(
+    x = "",
+    y = "Percentage"
+  ) + 
+  theme_minimal()
+
+sparsity_chart
+```
+
+```{r}
+
+# fix pseudo random number generator
+set.seed(17091826)
+
+# split data
+train_ids <- claims %>%
+  mutate(id = row_number()) %>%
+  slice_sample(prop = 0.8) %>%
+  pull(id)
+
+test_ids <- setdiff(seq_len(nrow(claims)), train_ids)
+
+train_dfm <- dfm_claims_15pct[train_ids, ]
+test_dfm  <- dfm_claims_15pct[test_ids, ]
+
+y_train <- claims$Ingroup[train_ids]
+y_test  <- claims$Ingroup[test_ids]
+
+# train naive bayes
+naive_bayes <- textmodel_nb(
+  x = train_dfm, # X_train
+  y = y_train,
+  prior = "docfreq"
+)
+
+# validate
+predictions <- predict(
+  naive_bayes,
+  newdata = test_dfm, # X_test
+  type = "class"
+)
+
+# get metrics
+confusionMatrix(
+  predictions,
+  as.factor(y_test)
+)
+```
+
+```{r}
+# load fbposts into environment
+fbposts_filtered <- fbposts %>%
+  filter(n_pictures == 1)
+
+#get intercoder reliability
+reliability <- fbposts_filtered %>%
+  test_icr(unit_var = post_id,
+           coder_var = coder_id,
+           holsti = FALSE,
+           agreement = FALSE,
+           kripp_alpha = TRUE,
+           fleiss_kappa = TRUE,
+           brennan_prediger = TRUE,
+           na.omit = TRUE)
+
+reliability
+```
